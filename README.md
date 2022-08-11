@@ -3,10 +3,10 @@
 
 ## Lanzar Kubernetes Cluster
 
-Para empezar a desplegar nuestra red Fabric tenemos que tener un cluster de Kubernetes. Para ello vamos a utilizar Minikube.
+Para empezar a desplegar nuestra red Fabric tenemos que tener un cluster de Kubernetes. Para ello vamos a utilizar KinD.
 
 ```bash
-minikube start
+kind create cluster
 ```
 
 ## Instalar operador de Kubernetes
@@ -16,6 +16,8 @@ En este paso vamos a instalar el operador de kubernetes para Fabric, esto instal
 - Desplegara el programa para desplegar los nodos en Kubernetes
 
 ```bash
+helm repo add kfs https://kfsoftware.github.io/hlf-helm-charts --force-update 
+
 helm install hlf-operator --version=1.7.0 kfs/hlf-operator
 ```
 
@@ -49,8 +51,8 @@ export ORDERER_VERSION=2.4.3
 ### Desplegar una autoridad de certificacion
 
 ```bash
-kubectl hlf ca create --storage-class=standard --capacity=2Gi --name=org1-ca \
-    --enroll-id=enroll --enroll-pw=enrollpw  
+kubectl hlf ca create --storage-class=standard --capacity=1Gi --name=org1-ca \
+    --enroll-id=enroll --enroll-pw=enrollpw
 kubectl wait --timeout=180s --for=condition=Running fabriccas.hlf.kungfusoftware.es --all
 ```
 
@@ -70,4 +72,45 @@ kubectl hlf peer create --statedb=couchdb --image=$PEER_IMAGE --version=$PEER_VE
         --enroll-pw=peerpw --capacity=5Gi --name=org1-peer0 --ca-name=org1-ca.default
 kubectl wait --timeout=180s --for=condition=Running fabricpeers.hlf.kungfusoftware.es --all
 ```
+
+
+## Desplegar una organizacion `Orderer`
+
+Para desplegar una organizacion `Orderer` tenemos que:
+
+1. Crear una autoridad de certificacion
+2. Registrar el usuario `orderer` con password `ordererpw`
+3. Crear orderer
+
+### Crear la autoridad de certificacion
+```bash
+kubectl hlf ca create --storage-class=standard --capacity=1Gi --name=ord-ca \
+    --enroll-id=enroll --enroll-pw=enrollpw
+kubectl wait --timeout=180s --for=condition=Running fabriccas.hlf.kungfusoftware.es --all
+
+```
+
+### Registrar el usuario `orderer`
+
+```bash
+kubectl hlf ca register --name=ord-ca --user=orderer --secret=ordererpw \
+    --type=orderer --enroll-id enroll --enroll-secret=enrollpw --mspid=OrdererMSP
+```
+
+### Desplegar orderer
+
+```bash
+kubectl hlf ordnode create --image=$ORDERER_IMAGE --version=$ORDERER_VERSION \
+    --storage-class=standard --enroll-id=orderer --mspid=OrdererMSP \
+    --enroll-pw=ordererpw --capacity=2Gi --name=ord-node1 --ca-name=ord-ca.default
+
+kubectl wait --timeout=180s --for=condition=Running fabricorderernodes.hlf.kungfusoftware.es --all
+```
+
+Comprobar que el orderer esta ejecutandose:
+```bash
+kubectl get pods
+```
+
+Ver si el pod que empieza por `ord-node1` esta ejecutandose.
 
