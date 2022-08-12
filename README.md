@@ -15,6 +15,8 @@ En este paso vamos a instalar el operador de kubernetes para Fabric, esto instal
 - CRD (Custom resource definitions) para desplegar Peers, Orderers y Autoridades de certification Fabric
 - Desplegara el programa para desplegar los nodos en Kubernetes
 
+Para instalar helm: [https://helm.sh/es/docs/intro/install/](https://helm.sh/es/docs/intro/install/)
+
 ```bash
 helm repo add kfs https://kfsoftware.github.io/hlf-helm-charts --force-update 
 
