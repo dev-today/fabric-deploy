@@ -239,10 +239,105 @@ kubectl hlf channel addanchorpeer --channel=demo --config=org1.yaml \
 ```
 
 
-## See ledger height
+## Ver altura de bloques de cada peer
 
 
 ```bash
 kubectl hlf channel top --channel=demo --config=org1.yaml \
     --user=admin -p=org1-peer0.default
 ```
+
+
+## Instalar un chaincode
+
+### Crear fichero de metadata
+
+```bash
+# remove the code.tar.gz chaincode.tgz if they exist
+rm code.tar.gz chaincode.tgz
+export CHAINCODE_NAME=asset
+export CHAINCODE_LABEL=asset
+cat << METADATA-EOF > "metadata.json"
+{
+    "type": "ccaas",
+    "label": "${CHAINCODE_LABEL}"
+}
+METADATA-EOF
+
+```
+
+### Preparar fichero de conexion
+
+```bash
+cat > "connection.json" <<CONN_EOF
+{
+  "address": "${CHAINCODE_NAME}:7052",
+  "dial_timeout": "10s",
+  "tls_required": false
+}
+CONN_EOF
+
+tar cfz code.tar.gz connection.json
+tar cfz chaincode.tgz metadata.json code.tar.gz
+export PACKAGE_ID=$(kubectl hlf chaincode calculatepackageid --path=chaincode.tgz --language=node --label=$CHAINCODE_LABEL)
+echo "PACKAGE_ID=$PACKAGE_ID"
+
+kubectl hlf chaincode install --path=./chaincode.tgz \
+    --config=org1.yaml --language=golang --label=$CHAINCODE_LABEL --user=admin --peer=org1-peer0.default
+
+```
+
+
+## Instalar contenedor chaincode en el cluster
+El siguiente comando creará o actualizará el CRD en función del packageID, el nombre del chaincode y la imagen docker.
+
+```bash
+kubectl hlf externalchaincode sync --image=kfsoftware/chaincode-external:latest \
+    --name=$CHAINCODE_NAME \
+    --namespace=default \
+    --package-id=$PACKAGE_ID \
+    --tls-required=false \
+    --replicas=1
+```
+
+
+## Consultar chaincodes instalados
+```bash
+kubectl hlf chaincode queryinstalled --config=org1.yaml --user=admin --peer=org1-peer0.default
+```
+
+## Aprobar chaincode
+```bash
+export SEQUENCE=1
+export VERSION="1.0"
+kubectl hlf chaincode approveformyorg --config=org1.yaml --user=admin --peer=org1-peer0.default \
+    --package-id=$PACKAGE_ID \
+    --version "$VERSION" --sequence "$SEQUENCE" --name=asset \
+    --policy="OR('Org1MSP.member')" --channel=demo
+```
+
+## Commit chaincode
+```bash
+kubectl hlf chaincode commit --config=org1.yaml --user=admin --mspid=Org1MSP \
+    --version "$VERSION" --sequence "$SEQUENCE" --name=asset \
+    --policy="OR('Org1MSP.member')" --channel=demo
+```
+
+
+## Invocar una transaction en el canal
+```bash
+kubectl hlf chaincode invoke --config=org1.yaml \
+    --user=admin --peer=org1-peer0.default \
+    --chaincode=asset --channel=demo \
+    --fcn=initLedger -a '[]'
+```
+
+## Consultar assets en el canal
+```bash
+kubectl hlf chaincode query --config=org1.yaml \
+    --user=admin --peer=org1-peer0.default \
+    --chaincode=asset --channel=demo \
+    --fcn=GetAllAssets -a '[]'
+```
+
+
