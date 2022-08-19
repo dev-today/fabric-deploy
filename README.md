@@ -341,3 +341,182 @@ kubectl hlf chaincode query --config=org1.yaml \
 ```
 
 
+# Añadir una segunda organizacion
+
+
+## Desplegar una autoridad de certificacion
+
+```bash
+kubectl hlf ca create --storage-class=standard --capacity=1Gi --name=org2-ca \
+    --enroll-id=enroll --enroll-pw=enrollpw
+kubectl wait --timeout=180s --for=condition=Running fabriccas.hlf.kungfusoftware.es --all
+```
+
+
+Registrar un usuario en la autoridad certificacion de la organizacion peer (Org2MSP)
+
+```bash
+# registrar usuario en la CA para los peers
+kubectl hlf ca register --name=org2-ca --user=peer --secret=peerpw --type=peer \
+ --enroll-id enroll --enroll-secret=enrollpw --mspid Org2MSP
+```
+
+## Desplegar un peer
+
+```bash
+kubectl hlf peer create --statedb=couchdb --image=$PEER_IMAGE --version=$PEER_VERSION --storage-class=standard --enroll-id=peer --mspid=Org2MSP \
+        --enroll-pw=peerpw --capacity=5Gi --name=org2-peer0 --ca-name=org2-ca.default
+
+kubectl wait --timeout=180s --for=condition=Running fabricpeers.hlf.kungfusoftware.es --all
+```
+
+
+## Añadir una segunda organizacion al canal
+
+Descargar todo el material criptografico
+```bash
+kubectl hlf org inspect -o Org2MSP --output-path=crypto-config
+```
+
+Añadir una segunda organizacion al canal
+```bash
+kubectl hlf channel addorg --peer=org1-peer0.default --name=demo \
+    --config=org1.yaml --user=admin --msp-id=Org2MSP --org-config=./configtx.yaml
+```
+
+Comprobar que la organizacion se ha añadido:
+```bash
+kubectl hlf channel inspect --channel=demo --config=org1.yaml \
+   --user=admin -p=org1-peer0.default > demo.json
+```
+
+
+## Preparar cadena de conexion para el Org2MSP
+
+1. Obtener la cadena de conexion sin usuarios para la organizacion Org1MSP, Org2MSP y OrdererMSP
+2. Registrar un usuario en la autoridad de certificacion para firma
+3. Obtener los certificados utilizando el usuario creado anteriormente
+4. Adjuntar el usuario a la cadena de conexion
+
+
+1. Obtener la cadena de conexion sin usuarios para la organizacion Org1MSP, Org2MSP y OrdererMSP
+
+```bash
+kubectl hlf inspect --output org2.yaml  -o Org1MSP -o Org2MSP -o OrdererMSP
+```
+
+2. Registrar un usuario en la autoridad de certificacion para firma
+```bash
+kubectl hlf ca register --name=org2-ca --user=admin --secret=adminpw --type=admin \
+ --enroll-id enroll --enroll-secret=enrollpw --mspid Org2MSP  
+```
+
+3. Obtener los certificados utilizando el usuario creado anteriormente
+```bash
+kubectl hlf ca enroll --name=org2-ca --user=admin --secret=adminpw --mspid Org2MSP \
+        --ca-name ca  --output peer-org2.yaml
+```
+
+4. Adjuntar el usuario a la cadena de conexion
+```bash
+kubectl hlf utils adduser --userPath=peer-org2.yaml --config=org2.yaml --username=admin --mspid=Org2MSP
+```
+
+### Unir peer de la org2 al canal
+
+```bash
+kubectl hlf channel join --name=demo --config=org2.yaml \
+    --user=admin -p=org2-peer0.default
+```
+### Anchor peer para org2 en el canal `demo`
+
+```bash
+kubectl hlf channel addanchorpeer \
+   --channel=demo --config=org2.yaml \
+   --user=admin --peer=org2-peer0.default
+```
+
+## Instalar chaincode en peer de Org2MSP
+
+### Crear fichero de metadata
+
+```bash
+# remove the code.tar.gz chaincode.tgz if they exist
+rm code.tar.gz chaincode.tgz
+export CHAINCODE_NAME=asset
+export CHAINCODE_LABEL=asset
+cat << METADATA-EOF > "metadata.json"
+{
+    "type": "ccaas",
+    "label": "${CHAINCODE_LABEL}"
+}
+METADATA-EOF
+
+```
+
+### Preparar fichero de conexion
+
+```bash
+cat > "connection.json" <<CONN_EOF
+{
+  "address": "${CHAINCODE_NAME}:7052",
+  "dial_timeout": "10s",
+  "tls_required": false
+}
+CONN_EOF
+
+tar cfz code.tar.gz connection.json
+tar cfz chaincode.tgz metadata.json code.tar.gz
+export PACKAGE_ID=$(kubectl hlf chaincode calculatepackageid --path=chaincode.tgz --language=node --label=$CHAINCODE_LABEL)
+echo "PACKAGE_ID=$PACKAGE_ID"
+
+kubectl hlf chaincode install --path=./chaincode.tgz \
+    --config=org2.yaml --language=golang --label=$CHAINCODE_LABEL --user=admin --peer=org2-peer0.default
+
+```
+
+## Aprobar y commit del chaincode
+
+### Aprobar chaincode en las 2 organizaciones
+
+```bash
+export SEQUENCE=4
+export VERSION="1.0"
+kubectl hlf chaincode approveformyorg --config=org1.yaml --user=admin --peer=org1-peer0.default \
+    --package-id=$PACKAGE_ID \
+    --version "$VERSION" --sequence "$SEQUENCE" --name=asset \
+    --policy="OR('Org1MSP.member', 'Org2MSP.member')" --channel=demo
+
+
+kubectl hlf chaincode approveformyorg --config=org2.yaml --user=admin --peer=org2-peer0.default \
+    --package-id=$PACKAGE_ID \
+    --version "$VERSION" --sequence "$SEQUENCE" --name=asset \
+    --policy="OR('Org1MSP.member', 'Org2MSP.member')" --channel=demo
+```
+
+
+
+### Commit chaincode
+```bash
+kubectl hlf chaincode commit --config=org1.yaml --user=admin --mspid=Org1MSP \
+    --version "$VERSION" --sequence "$SEQUENCE" --name=asset \
+    --policy="OR('Org1MSP.member', 'Org2MSP.member')" --channel=demo
+```
+
+## Probar chaincode
+
+### Invocar una transaction en el canal
+```bash
+kubectl hlf chaincode invoke --config=org2.yaml \
+    --user=admin --peer=org2-peer0.default \
+    --chaincode=asset --channel=demo \
+    --fcn=initLedger -a '[]'
+```
+
+### Consultar assets en el canal
+```bash
+kubectl hlf chaincode query --config=org2.yaml \
+    --user=admin --peer=org2-peer0.default \
+    --chaincode=asset --channel=demo \
+    --fcn=GetAllAssets -a '[]'
+```
