@@ -182,8 +182,8 @@ kubectl hlf ordnode join --block=demo.block --name=ord-node1 --namespace=default
 Para preparar la cadena de conexion, tenemos que:
 
 1. Obtener la cadena de conexion sin usuarios para la organizacion Org1MSP y OrdererMSP
-2. Registrar un usuario en la autoridad de certificacion para firma
-3. Obtener los certificados utilizando el usuario creado anteriormente
+2. Registrar un usuario en la autoridad de certificacion para firma (register)
+3. Obtener los certificados utilizando el usuario creado anteriormente (enroll)
 4. Adjuntar el usuario a la cadena de conexion
 
 1. Obtener la cadena de conexion sin usuarios para la organizacion Org1MSP y OrdererMSP
@@ -235,7 +235,7 @@ Necesitamos anchor peers para descubrir peers de otras organizaciones, si no ten
 
 ```bash
 kubectl hlf channel addanchorpeer --channel=demo --config=org1.yaml \
-    --user=admin --peer=org1-peer0.default 
+    --user=admin --peer=org1-peer0.default
 ```
 
 
@@ -263,7 +263,7 @@ cat << METADATA-EOF > "metadata.json"
     "label": "${CHAINCODE_LABEL}"
 }
 METADATA-EOF
-
+## chaincode as a service
 ```
 
 ### Preparar fichero de conexion
@@ -339,7 +339,6 @@ kubectl hlf chaincode query --config=org1.yaml \
     --chaincode=asset --channel=demo \
     --fcn=GetAllAssets -a '[]'
 ```
-
 
 # Añadir una segunda organizacion
 
