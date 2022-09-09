@@ -20,7 +20,7 @@ Para instalar helm: [https://helm.sh/es/docs/intro/install/](https://helm.sh/es/
 ```bash
 helm repo add kfs https://kfsoftware.github.io/hlf-helm-charts --force-update 
 
-helm install hlf-operator --version=1.7.0 kfs/hlf-operator
+helm install hlf-operator --version=1.8.0-beta5 kfs/hlf-operator
 ```
 
 
@@ -363,6 +363,10 @@ kubectl hlf ca register --name=org2-ca --user=peer --secret=peerpw --type=peer \
 ## Desplegar un peer
 
 ```bash
+export PEER_IMAGE=hyperledger/fabric-peer
+export PEER_VERSION=2.4.3  
+export ORDERER_IMAGE=hyperledger/fabric-orderer
+export ORDERER_VERSION=2.4.3
 kubectl hlf peer create --statedb=couchdb --image=$PEER_IMAGE --version=$PEER_VERSION --storage-class=standard --enroll-id=peer --mspid=Org2MSP \
         --enroll-pw=peerpw --capacity=5Gi --name=org2-peer0 --ca-name=org2-ca.default
 
@@ -377,7 +381,12 @@ Descargar todo el material criptografico
 kubectl hlf org inspect -o Org2MSP --output-path=crypto-config
 ```
 
-Añadir una segunda organizacion al canal
+Añadir una segunda organizacion al canal:
+Lo que esta operacion esta haciendo es:
+- Coger los certificados TLS y de firma de la organizacion Org2MSP, que estan referenciados en el configtx.yaml
+- Obtener la configuracion del canal y añadir la organizacion Org2MSP
+- Firmar la transaccion de actualizacion y enviarla al ordering service
+
 ```bash
 kubectl hlf channel addorg --peer=org1-peer0.default --name=demo \
     --config=org1.yaml --user=admin --msp-id=Org2MSP --org-config=./configtx.yaml
@@ -393,8 +402,8 @@ kubectl hlf channel inspect --channel=demo --config=org1.yaml \
 ## Preparar cadena de conexion para el Org2MSP
 
 1. Obtener la cadena de conexion sin usuarios para la organizacion Org1MSP, Org2MSP y OrdererMSP
-2. Registrar un usuario en la autoridad de certificacion para firma
-3. Obtener los certificados utilizando el usuario creado anteriormente
+2. Registrar un usuario en la autoridad de certificacion para firma (register)
+3. Obtener los certificados utilizando el usuario creado anteriormente (enroll)
 4. Adjuntar el usuario a la cadena de conexion
 
 
@@ -471,6 +480,8 @@ echo "PACKAGE_ID=$PACKAGE_ID"
 
 kubectl hlf chaincode install --path=./chaincode.tgz \
     --config=org2.yaml --language=golang --label=$CHAINCODE_LABEL --user=admin --peer=org2-peer0.default
+kubectl hlf chaincode install --path=./chaincode.tgz \
+    --config=org1.yaml --language=golang --label=$CHAINCODE_LABEL --user=admin --peer=org1-peer0.default
 
 ```
 
@@ -479,7 +490,7 @@ kubectl hlf chaincode install --path=./chaincode.tgz \
 ### Aprobar chaincode en las 2 organizaciones
 
 ```bash
-export SEQUENCE=4
+export SEQUENCE=3
 export VERSION="1.0"
 kubectl hlf chaincode approveformyorg --config=org1.yaml --user=admin --peer=org1-peer0.default \
     --package-id=$PACKAGE_ID \
@@ -494,6 +505,17 @@ kubectl hlf chaincode approveformyorg --config=org2.yaml --user=admin --peer=org
 ```
 
 
+## Instalar contenedor chaincode en el cluster
+El siguiente comando creará o actualizará el CRD en función del packageID, el nombre del chaincode y la imagen docker.
+
+```bash
+kubectl hlf externalchaincode sync --image=kfsoftware/chaincode-external:latest \
+    --name=$CHAINCODE_NAME \
+    --namespace=default \
+    --package-id=$PACKAGE_ID \
+    --tls-required=false \
+    --replicas=1
+```
 
 ### Commit chaincode
 ```bash
@@ -519,3 +541,8 @@ kubectl hlf chaincode query --config=org2.yaml \
     --chaincode=asset --channel=demo \
     --fcn=GetAllAssets -a '[]'
 ```
+
+
+## Añadir peers a las organizaciones
+
+Una vez que tenemos las organizaciones 
